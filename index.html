@@ -1,0 +1,341 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monetra - Money Management</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f6fb;
+      color: #202938;
+    }
+    header {
+      background: #172554;
+      color: white;
+      padding: 20px 7%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h2 { margin: 0; }
+    main { max-width: 1050px; margin: 35px auto; padding: 0 18px; }
+    .card {
+      background: white;
+      padding: 22px;
+      border-radius: 14px;
+      margin-bottom: 20px;
+      box-shadow: 0 3px 14px #0000000b;
+    }
+    .auth { max-width: 420px; margin: 45px auto; }
+    input, select, button {
+      width: 100%;
+      padding: 12px;
+      margin: 7px 0;
+      border: 1px solid #d7dce5;
+      border-radius: 8px;
+      font-size: 15px;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button.secondary { background: #e8eefc; color: #1d4ed8; }
+    button.danger { background: #dc2626; width: auto; padding: 8px 12px; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+    }
+    .summary .card { margin: 0; }
+    .income { color: #15803d; }
+    .expense { color: #dc2626; }
+    .muted { color: #64748b; font-size: 14px; }
+    .hidden { display: none; }
+    .transaction {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid #eee;
+      padding: 13px 0;
+    }
+    @media(max-width:650px) {
+      .summary { grid-template-columns: 1fr; }
+      header { padding: 18px; }
+      .transaction { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h2>Monetra.</h2>
+  <span>Money Management</span>
+</header>
+
+<main>
+  <section id="authSection" class="card auth">
+    <h2>Selamat datang di Monetra</h2>
+    <p class="muted">Kelola keuanganmu dengan lebih mudah.</p>
+    <input id="email" type="email" placeholder="Alamat email">
+    <input id="password" type="password" placeholder="Kata sandi">
+    <button onclick="signIn()">Masuk</button>
+    <button class="secondary" onclick="signUp()">Daftar akun baru</button>
+    <button class="secondary" onclick="googleSignIn()">Lanjutkan dengan Google</button>
+    <p id="authMessage" class="muted"></p>
+  </section>
+
+  <section id="dashboard" class="hidden">
+    <div class="card">
+      <h2>Dashboard Keuangan</h2>
+      <p id="userEmail" class="muted"></p>
+      <button class="secondary" onclick="signOut()">Keluar</button>
+    </div>
+
+    <div class="summary">
+      <div class="card">
+        <p class="muted">Total Pemasukan</p>
+        <h2 class="income" id="totalIncome">Rp0</h2>
+      </div>
+      <div class="card">
+        <p class="muted">Total Pengeluaran</p>
+        <h2 class="expense" id="totalExpense">Rp0</h2>
+      </div>
+      <div class="card">
+        <p class="muted">Sisa Saldo</p>
+        <h2 id="balance">Rp0</h2>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Tambah Transaksi</h3>
+      <input id="title" placeholder="Nama transaksi">
+      <input id="amount" type="number" min="1" placeholder="Nominal (Rp)">
+      <select id="type">
+        <option value="expense">Pengeluaran</option>
+        <option value="income">Pemasukan</option>
+      </select>
+      <select id="category">
+        <option>Makanan</option>
+        <option>Transportasi</option>
+        <option>Pendidikan</option>
+        <option>Hiburan</option>
+        <option>Belanja</option>
+        <option>Tagihan</option>
+        <option>Gaji</option>
+        <option>Lainnya</option>
+      </select>
+      <input id="date" type="date">
+      <button onclick="addTransaction()">Simpan Transaksi</button>
+      <p id="formMessage" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h3>Riwayat Transaksi</h3>
+      <input id="month" type="month" onchange="loadTransactions()">
+      <div id="transactionList">Memuat transaksi...</div>
+    </div>
+
+    <div class="card">
+      <h3>Evaluasi Keuangan</h3>
+      <p id="evaluation" class="muted">Tambahkan transaksi untuk melihat evaluasi.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+  // Isi setelah membuat project Supabase.
+  const SUPABASE_URL = "ISI_SUPABASE_PROJECT_URL";
+  const SUPABASE_ANON_KEY = "ISI_SUPABASE_PUBLISHABLE_KEY";
+
+  let db = null;
+  let currentUser = null;
+
+  const configured =
+    SUPABASE_URL.startsWith("https://") &&
+    SUPABASE_ANON_KEY !== "ISI_SUPABASE_PUBLISHABLE_KEY";
+
+  if (configured) {
+    db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    checkSession();
+  } else {
+    document.getElementById("authMessage").textContent =
+      "Login akan aktif setelah Supabase dikonfigurasi.";
+  }
+
+  function rupiah(value) {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency", currency: "IDR",
+      maximumFractionDigits: 0
+    }).format(value);
+  }
+
+  async function checkSession() {
+    const { data } = await db.auth.getSession();
+    if (data.session) {
+      currentUser = data.session.user;
+      showDashboard();
+    }
+    db.auth.onAuthStateChange((_event, session) => {
+      currentUser = session?.user || null;
+      if (currentUser) showDashboard();
+      else showAuth();
+    });
+  }
+
+  function showAuth() {
+    document.getElementById("authSection").classList.remove("hidden");
+    document.getElementById("dashboard").classList.add("hidden");
+  }
+
+  async function showDashboard() {
+    document.getElementById("authSection").classList.add("hidden");
+    document.getElementById("dashboard").classList.remove("hidden");
+    document.getElementById("userEmail").textContent = currentUser.email;
+    document.getElementById("date").value =
+      new Date().toISOString().slice(0, 10);
+    document.getElementById("month").value =
+      new Date().toISOString().slice(0, 7);
+    await loadTransactions();
+  }
+
+  async function signUp() {
+    if (!db) return alert("Supabase belum dikonfigurasi.");
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
+    const { error } = await db.auth.signUp({ email, password });
+    document.getElementById("authMessage").textContent =
+      error ? error.message : "Pendaftaran berhasil. Periksa email untuk verifikasi.";
+  }
+
+  async function signIn() {
+    if (!db) return alert("Supabase belum dikonfigurasi.");
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
+    const { error } = await db.auth.signInWithPassword({ email, password });
+    document.getElementById("authMessage").textContent =
+      error ? error.message : "Berhasil masuk.";
+  }
+
+  async function googleSignIn() {
+    if (!db) return alert("Supabase belum dikonfigurasi.");
+    const { error } = await db.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: location.origin }
+    });
+    if (error) alert(error.message);
+  }
+
+  async function signOut() {
+    await db.auth.signOut();
+  }
+
+  async function addTransaction() {
+    const title = document.getElementById("title").value.trim();
+    const amount = Number(document.getElementById("amount").value);
+    const type = document.getElementById("type").value;
+    const category = document.getElementById("category").value;
+    const date = document.getElementById("date").value;
+
+    if (!title || !Number.isFinite(amount) || amount <= 0 || !date) {
+      document.getElementById("formMessage").textContent =
+        "Lengkapi data dengan benar.";
+      return;
+    }
+
+    const { error } = await db.from("transactions").insert({
+      user_id: currentUser.id,
+      title, amount, type, category,
+      transaction_date: date
+    });
+
+    document.getElementById("formMessage").textContent =
+      error ? error.message : "Transaksi berhasil disimpan.";
+
+    if (!error) {
+      document.getElementById("title").value = "";
+      document.getElementById("amount").value = "";
+      await loadTransactions();
+    }
+  }
+
+  async function deleteTransaction(id) {
+    if (!confirm("Hapus transaksi ini?")) return;
+    const { error } = await db.from("transactions")
+      .delete().eq("id", id);
+    if (error) alert(error.message);
+    else loadTransactions();
+  }
+
+  async function loadTransactions() {
+    if (!currentUser) return;
+
+    const month = document.getElementById("month").value;
+    let query = db.from("transactions").select("*")
+      .order("transaction_date", { ascending: false });
+
+    if (month) {
+      const start = month + "-01";
+      const [year, mon] = month.split("-").map(Number);
+      const end = new Date(year, mon, 0).toISOString().slice(0, 10);
+      query = query.gte("transaction_date", start)
+                   .lte("transaction_date", end);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      document.getElementById("transactionList").textContent = error.message;
+      return;
+    }
+
+    const transactions = data || [];
+    const income = transactions
+      .filter(t => t.type === "income")
+      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const expense = transactions
+      .filter(t => t.type === "expense")
+      .reduce((sum, t) => sum + Number(t.amount), 0);
+
+    document.getElementById("totalIncome").textContent = rupiah(income);
+    document.getElementById("totalExpense").textContent = rupiah(expense);
+    document.getElementById("balance").textContent = rupiah(income - expense);
+
+    document.getElementById("transactionList").innerHTML =
+      transactions.length ? transactions.map(t => `
+        <div class="transaction">
+          <div>
+            <strong>${escapeHTML(t.title)}</strong>
+            <div class="muted">${escapeHTML(t.category)} · ${t.transaction_date}</div>
+            <strong class="${t.type === "income" ? "income" : "expense"}">
+              ${t.type === "income" ? "+" : "-"}${rupiah(t.amount)}
+            </strong>
+          </div>
+          <button class="danger" onclick="deleteTransaction('${t.id}')">Hapus</button>
+        </div>
+      `).join("") : "<p class='muted'>Belum ada transaksi.</p>";
+
+    const evaluation = expense === 0
+      ? "Belum ada pengeluaran pada periode ini."
+      : expense > income
+        ? "Pengeluaran lebih besar daripada pemasukan. Periksa kembali pengeluaranmu."
+        : "Keuanganmu masih memiliki sisa saldo. Tetap catat transaksi secara rutin.";
+
+    document.getElementById("evaluation").textContent = evaluation;
+  }
+
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;",
+      '"': "&quot;", "'": "&#39;"
+    })[c]);
+  }
+</script>
+</body>
+</html>
